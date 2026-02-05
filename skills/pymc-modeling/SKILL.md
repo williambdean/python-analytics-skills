@@ -246,7 +246,6 @@ model.point_logps()
 | `NaN` in log-probability | Invalid parameter combinations | Check parameter constraints, add bounds |
 | `-inf` log-probability | Observations outside likelihood support | Verify data matches distribution domain |
 | Slow discrete sampling | NUTS incompatible with discrete | Marginalize discrete variables |
-| Poor out-of-sample prediction | Static data arrays | Use `pm.Data` containers with `mutable=True` |
 
 See [references/troubleshooting.md](references/troubleshooting.md) for comprehensive problem-solution guide.
 

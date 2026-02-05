@@ -403,8 +403,8 @@ with pm.Model() as static_model:
 
 ```python
 with pm.Model() as mutable_model:
-    X = pm.Data("X", X_train, mutable=True)
-    y_obs = pm.Data("y_obs", y_train, mutable=True)
+    X = pm.Data("X", X_train)
+    y_obs = pm.Data("y_obs", y_train)
 
     beta = pm.Normal("beta", 0, 1, dims="features")
     sigma = pm.HalfNormal("sigma", 1)
