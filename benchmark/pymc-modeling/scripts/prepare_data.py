@@ -10,9 +10,9 @@ from pathlib import Path
 
 import numpy as np
 import polars as pl
+import pymc as pm
 
 DATA_DIR = Path(__file__).parent.parent / "data"
-SP500_SOURCE = Path.home() / "repos" / "pymc-examples" / "examples" / "data" / "SP500.csv"
 SEED = 42
 
 
@@ -36,7 +36,7 @@ def prepare_gss():
 
 def prepare_sp500():
     """Subsample S&P 500 returns for T3 (stochastic volatility) task."""
-    raw = pl.read_csv(SP500_SOURCE)
+    raw = pl.read_csv(pm.get_data("SP500.csv"))
     # Subsample to ~750 rows (roughly 3 years of trading days)
     sub = raw.head(750).select([
         pl.col("Date").alias("date"),

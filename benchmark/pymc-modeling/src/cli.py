@@ -93,7 +93,8 @@ def cmd_score(args):
             f"{r.task_id} {r.condition} rep{r.rep}: "
             f"produced={r.model_produced} conv={r.convergence} "
             f"approp={r.model_appropriateness} bp={r.best_practices} "
-            f"total={r.total}/20"
+            f"thrash={r.thrashing} eff={r.efficiency} "
+            f"total={r.total}/30"
         )
 
     return 0
@@ -215,7 +216,7 @@ def cmd_validate(args):
     for cond, run_dir in [("no_skill", no_skill_dir), ("with_skill", with_skill_dir)]:
         try:
             score = score_run(run_dir, "T1_hierarchical", cond, 0)
-            log(f"PASS: Scorer returned total={score.total}/20 for {cond}")
+            log(f"PASS: Scorer returned total={score.total}/30 for {cond}")
             checks.append((f"scorer_{cond}", True, []))
         except Exception as e:
             log(f"FAIL: Scorer error in {cond}: {e}")
