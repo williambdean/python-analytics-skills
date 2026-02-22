@@ -9,6 +9,11 @@
       "name": "marimo-notebook",
       "description": "Reactive Python notebooks with marimo",
       "version": "1.0.0"
+    },
+    {
+      "name": "bayesian-workflow",
+      "description": "Bayesian modeling workflow and iterative model-building strategy",
+      "version": "1.0.0"
     }
   ]
 }

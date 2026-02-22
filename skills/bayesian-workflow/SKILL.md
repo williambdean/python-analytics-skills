@@ -11,147 +11,140 @@ description: >
 
 # Bayesian Workflow
 
-Principled approach to iterative Bayesian model building, drawing on Gelman, Vehtari, and McElreath (2025) and Gelman et al. (2020).
+Principled, iterative model building based on Gelman, Vehtari & McElreath (2025) and Gelman et al. (2020). For PyMC API details, see the `pymc-modeling` skill. This skill governs *strategy*.
 
-Real-world Bayesian modeling is not "specify a model, fit it, report results." It is an iterative process of building up models, checking them against data and domain knowledge, and expanding only when simpler models demonstrably fail. Every model exists in relation to other models.
+Real-world Bayesian modeling is not "specify a model, fit it, report results." It is an iterative process of building up models, checking them against data and domain knowledge, and expanding only when simpler models demonstrably fail.
 
-For PyMC implementation details (API patterns, samplers, diagnostics code), see the `pymc-modeling` skill. This skill covers the *strategy* of how to build and evaluate models.
+## Required Workflow Steps
 
-## The Iteration Loop
+For EVERY modeling task, execute these steps in order. Do not skip steps.
 
+### Step 1: Start with the Simplest Plausible Model
+
+Write the simplest model that could address the question. Fit it. Understand it.
+
+- For grouped data: start with complete pooling (single intercept), then no pooling, then partial pooling
+- For regression: start with one or two key predictors, not all of them
+- For time series: start with a simple trend or random walk before adding structure
+
+**Why**: Complex models are understood in relation to simpler ones. Each expansion reveals what the added complexity buys. Computational problems are easier to diagnose in simple models.
+
+Save `results.nc` immediately after your first successful sampling run. You can overwrite it later.
+
+### Step 2: Prior Predictive Check
+
+BEFORE calling `pm.sample()` on your first model, run a prior predictive check:
+
+```python
+with model:
+    prior_pred = pm.sample_prior_predictive(draws=500)
+
+# Check implied range on the OBSERVABLE scale
+prior_y = prior_pred.prior_predictive["y"].values.flatten()
+print(f"Prior predictive range: [{prior_y.min():.1f}, {prior_y.max():.1f}]")
+print(f"Prior predictive mean: {prior_y.mean():.1f}, std: {prior_y.std():.1f}")
 ```
-specify → simulate fake data → check priors → fit simple model → diagnose →
-    → criticize with posterior predictive checks → expand if needed → compare → report
+
+Ask: does the generative model produce datasets that look like plausible datasets from this domain? Look for absurd implications (negative counts, probabilities outside [0,1], impossibly large effects). If the prior predictive range is unreasonable, adjust priors and re-check before fitting.
+
+Prior predictive checks are especially important for complex models where interactions between priors on multiple parameters create unexpected behavior on the outcome scale.
+
+### Step 3: Fit and Diagnose
+
+After fitting, check convergence before interpreting results:
+
+```python
+# Check divergences
+n_div = idata.sample_stats["diverging"].sum().item()
+print(f"Divergences: {n_div}")
+
+# Summary with convergence diagnostics
+print(az.summary(idata, var_names=[...]))
 ```
 
-Do not skip steps. Each one catches different problems.
+**Pass criteria** — all must hold before proceeding:
+- Zero divergences (or < 0.1% and randomly scattered)
+- R-hat < 1.01 for all parameters
+- ESS_bulk > 400 and ESS_tail > 400
 
-## Start Simple, Build Up
+If diagnostics fail, the problem is usually the model, not the sampler (the "folk theorem"). Reparameterize (non-centered for weak data, centered for strong data) or simplify before reaching for sampler tuning knobs.
 
-Begin with the simplest model that could plausibly address the question. Fit it. Understand it. Then add complexity one piece at a time.
+### Step 4: Posterior Predictive Check
 
-**Why this matters:**
-- Simpler models are easier to understand and debug
-- Complex models are best understood in relation to simpler special cases
-- Each expansion reveals what the added complexity buys (or doesn't)
-- Computational problems often emerge from modeling problems — starting simple isolates them
-- Sometimes the simple model is sufficient, and you can demonstrate this by showing the expansion doesn't help
+Run a posterior predictive check after EVERY model you fit:
 
-**Example sequence for a treatment effect study:**
-1. Complete pooling (single mean per group)
-2. Add pre-treatment covariates one at a time — see what each adjustment does
-3. Allow treatment effects to vary by subgroup (partial pooling)
-4. Add nonlinearity if residual patterns demand it
+```python
+with model:
+    pm.sample_posterior_predictive(idata, extend_inferencedata=True)
 
-At each step: diagnose convergence, check posterior predictive fit, compare to the previous model.
-
-## Simulate Before You Fit
-
-Before touching real data, simulate from your model with known parameter values. Then fit your model to the simulated data and check whether it recovers the true parameters.
-
-This is not optional. It catches:
-- Specification bugs (wrong indexing, shape mismatches)
-- Non-identifiability (parameters the data cannot distinguish)
-- Prior-likelihood conflict (priors too strong or too weak)
-- Computational problems unrelated to real-data messiness
-
+# Compare posterior predictions to observed data
+az.plot_ppc(idata, kind="cumulative")
 ```
+
+The goal is not to "accept" or "reject" the model. The goal is to find *specific, interpretable ways* the model fails, which tell you what to fix next. Look for:
+- Systematic deviations in the tails or center
+- Patterns the model should capture but doesn't (clustering, heteroscedasticity, nonlinearity)
+- Focus on the quantities that matter for the question at hand
+
+### Step 5: Expand and Compare
+
+Add ONE piece of complexity at a time. Fit the expanded model, repeat Steps 3-4, then compare:
+
+```python
+# Compute log-likelihood if using nutpie
+pm.compute_log_likelihood(idata_simple, model=model_simple)
+pm.compute_log_likelihood(idata_complex, model=model_complex)
+
+comparison = az.compare({
+    "simple": idata_simple,
+    "complex": idata_complex,
+})
+print(comparison[["rank", "elpd_loo", "d_loo", "dse", "weight"]])
+```
+
+**Decision rule**: If `d_loo < 2 * dse`, models are effectively equivalent — prefer the simpler one.
+
+Fit the expanded model even when you believe the simpler one is sufficient. The comparison itself is informative:
+- If the expansion doesn't improve fit, you've demonstrated the simpler model is adequate — report this
+- If it does improve fit, you've identified important structure
+- The *difference* between models tells you something about the data-generating process
+
+### Step 6: Report the Full Workflow
+
+Report the sequence of models, not just the final one. The modeling journey IS the analysis.
+
+Structure your report as:
+1. What simple model you started with and what it revealed
+2. What prior predictive checks showed about your assumptions
+3. What posterior predictive checks revealed about model fit at each stage
+4. What expansions you tried, which helped, and which didn't
+5. How model comparison (LOO) informed your choices
+6. Final parameter estimates with uncertainty and interpretation
+7. Sensitivity: how conclusions change under reasonable alternative specifications
+
+## When to Simulate Fake Data First
+
+For novel or complex model structures, simulate from your model with known parameter values before touching real data. Then fit to the simulated data and check parameter recovery:
+
 1. Choose plausible parameter values (informed by domain knowledge)
 2. Simulate a dataset from the generative model
 3. Fit the model to simulated data
 4. Check: are the true parameters recovered within posterior intervals?
-5. Repeat with different parameter values and sample sizes
-```
 
-For a more systematic version, see simulation-based calibration (SBC): generate many fake datasets, fit each one, and check that posterior intervals have correct coverage.
+This catches specification bugs, non-identifiability, and prior-likelihood conflicts before real-data messiness obscures the picture. It is most valuable for custom likelihoods, latent variable models, and models with complex indexing.
 
-**Perturbation experiments:** Vary the conditions — change sample size, move design points closer together, add outliers, try parameter values at the boundaries of plausibility. Understand where the fitting procedure breaks down.
+## Hierarchical Models and Partial Pooling
 
-## Prior Predictive Criticism
+You rarely want complete pooling (ignoring group differences) or no pooling (ignoring similarities). Hierarchical structure lets the data determine how much to share across groups.
 
-Prior predictive checking is not just "do the priors look reasonable." It is asking: **does my generative model produce datasets that look like plausible datasets from this domain?**
+When building hierarchical models iteratively:
+1. Start with complete pooling (single intercept)
+2. Move to no pooling (group-specific intercepts) — compare to pooled
+3. Add partial pooling (hierarchical intercepts) — compare to both
+4. Allow slopes to vary by group if the question warrants it
+5. Add group-level predictors to explain between-group variance
 
-Push beyond summary statistics:
-- Simulate full datasets from the prior predictive and plot them
-- Check implied ranges on *observable* quantities, not just parameters
-- Look for absurd implications (negative counts, probabilities outside [0,1], impossibly large effect sizes)
-- If prior predictive datasets look nothing like your data, your priors are encoding wrong information — fix them before fitting
-
-Prior predictive checks are especially important for complex models where the interaction between priors on multiple parameters creates unexpected behavior on the outcome scale.
-
-## Model Criticism and Posterior Predictive Checks
-
-After fitting, check whether the model captures the relevant structure of the data.
-
-The goal is **not** to "accept" or "reject" the model — all models are wrong. The goal is to find *specific, interpretable ways* the model fails, which tell you what to fix.
-
-- **Posterior predictive checks:** Simulate replicated datasets from the posterior. Do they resemble the observed data? Look at distributions, summary statistics, and patterns the model should capture.
-- **Residual patterns:** Are there systematic deviations? These suggest missing structure (nonlinearity, heteroscedasticity, clustering).
-- **Cross-validation:** LOO-CV identifies observations the model predicts poorly. High Pareto-k values point to influential observations or model misspecification.
-- **Focus on the quantities that matter:** If you care about tail behavior, check tails. If you care about group differences, check group-level predictions. Generic goodness-of-fit tests are less useful than targeted checks.
-
-## The Folk Theorem
-
-> "When you have computational problems, often there's a problem with your model."
-> — Andrew Gelman
-
-When sampling is slow, divergent, or produces poor diagnostics:
-- The problem is usually the model, not the sampler
-- Reparameterize (non-centered for weak data, centered for strong data)
-- Simplify — remove complexity until it works, then add back piece by piece
-- Check for near-non-identifiability (highly correlated parameters, ridges in the posterior)
-- **Do not** reach for sampler tuning knobs (more warmup, higher tree depth) as a first resort
-
-Computational problems are diagnostic information about your model.
-
-## Combining Information from Multiple Sources
-
-Hierarchical models allow partial pooling across data sources without assuming they are identical or treating them as completely separate.
-
-**When to partially pool:**
-- Data from related experiments, populations, or time periods
-- Information from different measurement instruments
-- Prior information from published studies or expert knowledge
-
-**The key principle:** You rarely want complete pooling (ignoring differences) or no pooling (ignoring similarities). Hierarchical structure lets the data determine how much to share.
-
-Prior distributions are another way to incorporate external information — a prior on an effect size informed by previous studies is combining information, not "being subjective."
-
-## Model Expansion as Understanding
-
-Fit the expanded model even when you believe the simpler one is sufficient. The comparison itself is informative:
-
-- If the expansion doesn't improve fit, you've demonstrated the simpler model is adequate — this is a finding worth reporting
-- If it does improve fit, you've identified important structure
-- The *difference* between models tells you something about the data-generating process
-
-This applies to:
-- Adding predictors to a regression
-- Allowing parameters to vary by group
-- Replacing a parametric assumption with something more flexible
-- Adding a measurement error layer
-
-## Measurement and Latent Variables
-
-Real measurements are noisy proxies for the quantities we care about. When measurement error is non-trivial relative to the effects you're estimating:
-
-- Add a measurement model layer that bridges observed data and latent quantities
-- This is straightforward in the Bayesian framework: latent variables get priors and are estimated jointly with everything else
-- Ignoring measurement error biases estimates (typically attenuation bias — effects look smaller than they are)
-
-Common examples: test scores as proxies for ability, self-reported data, instruments with known precision.
-
-## Reporting
-
-Report the workflow, not just the final model:
-
-- What simpler models did you try first? Why did you move beyond them?
-- What did prior predictive checks reveal about your assumptions?
-- What did posterior predictive checks reveal about model fit?
-- What expansions did you try that didn't help?
-- How sensitive are conclusions to reasonable alternative specifications?
-
-The sequence of models *is* the analysis. The final model alone tells an incomplete story.
+At each step, compare via LOO and check whether the added structure reduces between-group variance.
 
 ## References
 

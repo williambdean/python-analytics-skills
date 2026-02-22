@@ -19,6 +19,8 @@ This skill bridges that gap. It encodes modern best practices like using nutpie 
 
 Without this skill, Claude might suggest outdated defaults like the slow default NUTS sampler, miss critical diagnostics such as ESS and r_hat checks, or recommend inefficient parameterizations that lead to divergences. With it, you get concise, battle-tested patterns that actually work in practice.
 
+**Modeling strategy**: For guidance on iterative model building — starting simple, fake-data simulation, prior predictive criticism, model expansion, and combining information — see the `bayesian-workflow` skill.
+
 **Notebook preference**: Use marimo for interactive modeling unless the project already uses Jupyter.
 
 ## Model Specification
