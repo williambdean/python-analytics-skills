@@ -11,6 +11,7 @@ Criteria:
 
 import json
 import logging
+import os
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -29,7 +30,7 @@ TASKS_PATH = BENCHMARK_DIR / "tasks.yaml"
 
 # LLM judge settings
 JUDGE_MODEL = "haiku"
-JUDGE_BUDGET = "0.05"
+JUDGE_BUDGET = "0.50"
 JUDGE_TIMEOUT = 60
 
 
@@ -111,6 +112,10 @@ def _extract_judge_json(response: str) -> dict | None:
 def _call_judge(prompt: str) -> dict | None:
     """Call LLM judge and return parsed JSON response."""
     try:
+        # Strip CLAUDECODE to allow nested claude --print calls.
+        env = os.environ.copy()
+        env.pop("CLAUDECODE", None)
+
         proc = subprocess.run(
             [
                 "claude",
@@ -125,6 +130,7 @@ def _call_judge(prompt: str) -> dict | None:
             capture_output=True,
             text=True,
             timeout=JUDGE_TIMEOUT,
+            env=env,
         )
         response = proc.stdout.strip()
         return _extract_judge_json(response), response

@@ -11,6 +11,7 @@ Criteria:
 
 import json
 import logging
+import os
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -30,7 +31,7 @@ TASKS_PATH = Path(__file__).parent.parent / "tasks.yaml"
 
 # LLM judge settings
 JUDGE_MODEL = "haiku"
-JUDGE_BUDGET = "0.05"
+JUDGE_BUDGET = "0.50"
 JUDGE_TIMEOUT = 60
 
 
@@ -361,6 +362,10 @@ Code:
 ```"""
 
     try:
+        # Strip CLAUDECODE to allow nested claude --print calls.
+        env = os.environ.copy()
+        env.pop("CLAUDECODE", None)
+
         proc = subprocess.run(
             [
                 "claude",
@@ -375,6 +380,7 @@ Code:
             capture_output=True,
             text=True,
             timeout=JUDGE_TIMEOUT,
+            env=env,
         )
 
         response = proc.stdout.strip()
