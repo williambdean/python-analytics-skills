@@ -5,6 +5,7 @@ model.py, runs it via Bash tool, and produces results.nc. The runner captures
 the full JSON response for scoring.
 """
 
+import concurrent.futures
 import json
 import logging
 import os
@@ -349,12 +350,41 @@ def run_single(
     if not force and is_cached(task_id, condition, rep):
         logger.info(f"Cached: {task_id} {condition} rep{rep}")
         meta = json.loads((run_dir / "metadata.json").read_text())
+        # Upgrade old metadata: apply artifact-based success retroactively
+        cached_success = meta.get("success", False)
+        if not cached_success:
+            has_model = (run_dir / "model.py").exists()
+            has_results = (run_dir / "results.nc").exists()
+            if has_model and has_results:
+                cached_success = True
+                meta["success"] = True
+                meta["partial"] = True
+                (run_dir / "metadata.json").write_text(
+                    json.dumps(meta, indent=2)
+                )
+                logger.info(
+                    f"Upgraded to success (artifacts): {task_id} {condition} rep{rep}"
+                )
+        # Recover num_turns from turns.jsonl if metadata has 0
+        if meta.get("num_turns", 0) == 0:
+            turns_path = run_dir / "turns.jsonl"
+            if turns_path.exists():
+                num_lines = sum(1 for _ in open(turns_path))
+                if num_lines > 0:
+                    meta["num_turns"] = num_lines
+                    (run_dir / "metadata.json").write_text(
+                        json.dumps(meta, indent=2)
+                    )
+                    logger.info(
+                        f"Recovered num_turns={num_lines} from turns.jsonl: "
+                        f"{task_id} {condition} rep{rep}"
+                    )
         return RunResult(
             task_id=task_id,
             condition=condition,
             rep=rep,
             run_dir=run_dir,
-            success=meta.get("success", False),
+            success=cached_success,
             wall_time=meta.get("wall_time", 0.0),
             input_tokens=meta.get("input_tokens", 0),
             cache_creation_tokens=meta.get("cache_creation_tokens", 0),
@@ -407,6 +437,11 @@ def run_single(
     except subprocess.TimeoutExpired:
         # Kill the entire process group
         _kill_process_group(proc)
+        # Try to capture any buffered stdout before it's lost
+        try:
+            raw = proc.stdout.read() or ""
+        except Exception:
+            raw = ""
         elapsed = timeout
         error = f"Timeout after {timeout}s"
         logger.warning(f"Timeout: {task_id} {condition} rep{rep}")
@@ -462,13 +497,24 @@ def run_single(
             for turn in parsed["turns"]:
                 f.write(json.dumps(turn) + "\n")
 
+    # Determine success: CLI-based or artifact-based
+    has_model = (run_dir / "model.py").exists()
+    has_results = (run_dir / "results.nc").exists()
+    cli_success = bool(parsed and not error and parsed.get("total_input_tokens", 0) > 0)
+    artifact_success = has_model and has_results
+
+    # Recover num_turns from parsed turns when the result line is missing
+    parsed_num_turns = parsed.get("num_turns", 0)
+    actual_turns = len(parsed.get("turns", []))
+    num_turns = parsed_num_turns or actual_turns
+
     # Save metadata
     result = RunResult(
         task_id=task_id,
         condition=condition,
         rep=rep,
         run_dir=run_dir,
-        success=bool(parsed and not error and parsed.get("total_input_tokens", 0) > 0),
+        success=cli_success or artifact_success,
         wall_time=elapsed,
         input_tokens=parsed.get("input_tokens", 0),
         cache_creation_tokens=parsed.get("cache_creation_tokens", 0),
@@ -485,8 +531,9 @@ def run_single(
         "condition": condition,
         "rep": rep,
         "success": result.success,
+        "partial": not cli_success and artifact_success,
         "wall_time": result.wall_time,
-        "num_turns": parsed.get("num_turns", 0),
+        "num_turns": num_turns,
         "input_tokens": result.input_tokens,
         "cache_creation_tokens": result.cache_creation_tokens,
         "cache_read_tokens": result.cache_read_tokens,
@@ -517,6 +564,7 @@ def run_all(
     force: bool = False,
     resume: bool = False,
     tasks: list[str] | None = None,
+    max_workers: int = 3,
 ) -> list[RunResult]:
     """Run all tasks in both conditions, interleaving for fairness.
 
@@ -525,6 +573,7 @@ def run_all(
         force: Overwrite all cached results
         resume: Only run missing/failed runs
         tasks: Specific task IDs to run (None = all)
+        max_workers: Maximum number of parallel runs (default 3)
     """
     config = load_tasks()
     task_ids = tasks or list(config["tasks"].keys())
@@ -537,22 +586,31 @@ def run_all(
             for condition in conditions:
                 schedule.append((task_id, condition, rep))
 
-    results = []
+    # Filter schedule for resume mode
+    todo = []
     for task_id, condition, rep in schedule:
         if resume and is_cached(task_id, condition, rep):
-            # In resume mode, check if previous run was successful
             run_dir = get_run_dir(task_id, condition, rep)
             meta = json.loads((run_dir / "metadata.json").read_text())
             if meta.get("success", False):
                 logger.info(f"Skipping (resume, success): {task_id} {condition} rep{rep}")
                 continue
+        todo.append((task_id, condition, rep))
 
-        result = run_single(task_id, condition, rep, force=force)
-        results.append(result)
-        logger.info(
-            f"{'OK' if result.success else 'FAIL'}: "
-            f"{task_id} {condition} rep{rep} "
-            f"({result.wall_time:.0f}s, {result.total_input_tokens} tokens)"
-        )
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(run_single, tid, cond, r, force): (tid, cond, r)
+            for tid, cond, r in todo
+        }
+        for future in concurrent.futures.as_completed(futures):
+            tid, cond, r = futures[future]
+            result = future.result()
+            results.append(result)
+            logger.info(
+                f"{'OK' if result.success else 'FAIL'}: "
+                f"{tid} {cond} rep{r} "
+                f"({result.wall_time:.0f}s, {result.total_input_tokens} tokens)"
+            )
 
     return results
