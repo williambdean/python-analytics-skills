@@ -12,45 +12,33 @@ A plugin for Claude Code and other AI coding platforms providing [Agent Skills](
 
 ## Installation
 
-### As a Claude Code Plugin (Recommended)
-
-```bash
-claude plugin marketplace add /path/to/python-analytics-skills
-```
-
-Or install from GitHub:
-
-```bash
-claude plugin marketplace add https://github.com/pymc-labs/python-analytics-skills
-```
-
-### Via npx
+### Via npx (Recommended — works across agents)
 
 ```bash
 npx skills add pymc-labs/python-analytics-skills
 ```
 
-### Manual Installation to Platform Skills Directories
+One command, works with Claude Code, Cursor, Gemini CLI, and 15+ other agents.
 
-Use the install script to copy skills to any supported platform:
+### As a Claude Code Plugin
+
+Two-step process using Claude Code slash commands:
+
+```bash
+/plugin marketplace add pymc-labs/python-analytics-skills
+/plugin install analytics@pymc-labs-python-analytics-skills
+```
+
+Installs all skills plus the keyword-suggestion hook. Supports `/plugin update` for future updates.
+
+### Manual Installation
 
 ```bash
 git clone https://github.com/pymc-labs/python-analytics-skills.git
 cd python-analytics-skills
-
-# Install to a specific platform
-./install.sh claude              # Claude Code (~/.claude/skills/)
-./install.sh opencode            # OpenCode (~/.config/opencode/skills/)
-./install.sh gemini              # Gemini CLI (~/.gemini/skills/)
-./install.sh cursor              # Cursor (~/.cursor/skills/)
-./install.sh copilot             # VS Code Copilot (~/.copilot/skills/)
+./install.sh claude              # Claude Code
 ./install.sh all                 # All platforms
-
-# Install a specific skill
-./install.sh claude -- pymc-modeling
-
-# Preview without changes
-./install.sh --dry-run claude
+./install.sh claude -- pymc-modeling  # Specific skill only
 ```
 
 ### Utility Commands
