@@ -331,6 +331,10 @@ az.plot_khat(idata)
 ### Comparing Models
 
 ```python
+# If using nutpie, compute log-likelihood first (nutpie doesn't store it automatically)
+pm.compute_log_likelihood(idata_a, model=model_a)
+pm.compute_log_likelihood(idata_b, model=model_b)
+
 comparison = az.compare({
     "model_a": idata_a,
     "model_b": idata_b,
